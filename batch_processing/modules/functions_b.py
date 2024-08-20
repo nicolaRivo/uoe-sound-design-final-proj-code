@@ -330,7 +330,10 @@ def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_he
     plt.text(0.01, 0.95, f'Log-frequency Power Spectrogram - {song_name}',
              fontsize=12, ha='left', va='top', transform=plt.gca().transAxes)
 
-    output_file = os.path.join(song_dir, f"STFT_{song_name}.png")
+
+    output_file = os.path.join(song_dir, f"STFT.png")
+    #output_file = os.path.join(song_dir, f"STFT - {song_name}.png")
+
     plt.savefig(output_file)
     plt.close()
 
@@ -340,6 +343,300 @@ def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_he
             json.dump(tracking_data, f, indent=4)
     
     print(f"STFT processing complete for {song_name}.\n Saved to {output_file}.")
+
+@log_elapsed_time(lambda *args, **kwargs: f"Self-Similarity Matrix and Chromagram - {Path(args[0]['path']).name}")
+def process_SSM_and_chr_and_save(features, json_path, save_path, jignore=False):
+    """
+    Processes the self-similarity matrix (SSM) and Chromagram of the given audio file, applies diagonal enhancement, and saves the plots.
+    Updates the processing status in the JSON file.
+    
+    Parameters:
+    - audio_file: tuple containing (y, sr, path, duration)
+    - json_path: str, path to the JSON tracking file
+    - save_path: str, directory where plots will be saved
+    - jignore: bool, whether to ignore updating the JSON file
+    """
+    
+    def get_ssm(C):
+        CNorm = np.sqrt(np.sum(C**2, axis=0))
+        C = C / CNorm[None, :]
+        return np.dot(C.T, C)
+
+    def chunk_average(C, f):
+        C2 = np.zeros((C.shape[0], C.shape[1] // f))
+        for j in range(C2.shape[1]):
+            C2[:, j] = np.mean(C[:, j * f:(j + 1) * f], axis=1)
+        return C2
+
+    def diagonally_enhance(D, K):
+        M = D.shape[0] - K + 1
+        S = np.zeros((M, M))
+        for i in range(M):
+            for j in range(M):
+                avg = 0
+                for k in range(K):
+                    avg += D[i + k, j + k]
+                S[i, j] = avg / K
+        return S
+
+    # Load the tracking JSON file
+    if os.path.exists(json_path) and not jignore:
+        with open(json_path, 'r') as f:
+            tracking_data = json.load(f)
+    else:
+        tracking_data = {}
+
+    # Initialize variables
+    y = features['y']
+    sr = features['sr']
+    audio_path = features['path']
+
+    # Set parameters for CQT and Chromagram
+    hop_length = math.ceil(sr / 5)  # Adjust hop_length for time resolution
+    compression_ratio = 0.4  # Compression ratio for dynamic range compression
+    
+    # Get the name of the song from the audio path
+    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+    # Check if this step has already been processed
+    if tracking_data.get(song_name, {}).get("SSM_processed", False):
+        print(f"Self-Similarity Matrix already processed for {song_name}. Skipping...")
+        return
+
+    #---COMPUTING CHROMA---#
+
+    # Compute Chromagram directly from the harmonic component of the audio
+    chroma = features['chroma'] 
+    # Perform global normalization on the chromagram
+    chroma_max = chroma.max()
+    if (chroma_max > 0):
+        chroma /= chroma_max
+
+    # Apply dynamic range compression
+    chroma = chroma ** compression_ratio
+
+    #---COMPUTING SSM---#
+
+    # Compute Mel spectrogram
+    mel = librosa.feature.melspectrogram(y=y, sr=sr)
+    mel_to_db = librosa.power_to_db(mel, ref=np.max)
+
+    # Compute Self-Similarity Matrix
+    D = get_ssm(chunk_average(mel_to_db, 43))
+
+    # Diagonally enhance the matrix
+    DDiag = diagonally_enhance(D, 4)
+
+    # Determine the size of s
+    s = 12  # You can adjust this value as needed for appropriate graph filling
+
+    # Plotting SSM and Chromagram
+    plt.figure(figsize=(s, s + s / 2))  # Height is s + s/2 to fit both plots
+
+    # Plot Self-Similarity Matrix (Square)
+    ax1 = plt.subplot2grid((3, 1), (0, 0), rowspan=2)
+    im1 = ax1.imshow(DDiag, cmap='magma')
+    ax1.set_aspect('equal')  # Ensure the plot is square
+    ax1.xaxis.set_ticks_position('top')
+    ax1.xaxis.set_label_position('top')
+    plt.title(f'Self-Similarity Matrix: {song_name}')
+    #plt.colorbar(im1, ax=ax1)
+
+    # Convert frames to seconds for x and y axis labels
+    hop = 512
+    frames_per_second = sr / hop
+    num_frames = DDiag.shape[0]
+    integer_ticks = np.arange(0, int(num_frames // frames_per_second) + 1)
+    ax1.set_xticks(integer_ticks * frames_per_second)
+    ax1.set_xticklabels(integer_ticks)
+    ax1.set_yticks(integer_ticks * frames_per_second)
+    ax1.set_yticklabels(integer_ticks)
+
+    # Plotting Chromagram (Rectangle, width=s, height=s/2)
+    ax2 = plt.subplot2grid((3, 1), (2, 0), rowspan=1)
+    chroma_img = librosa.display.specshow(chroma, sr=sr, hop_length=hop_length, x_axis='time', y_axis='chroma', ax=ax2)
+    plt.title(f'Chromagram for {song_name}')
+    #plt.colorbar(chroma_img, ax=ax2)
+
+    # Set the aspect ratio and align the Chromagram to the top
+    ax2.set_aspect(aspect=2)  # Aspect ratio 2:1 to make it half the height of SSM
+    ax2.set_anchor('N')  # Align Chromagram plot to the top
+
+    plt.tight_layout()
+
+    #plot_path = os.path.join(save_path, f"SSM_Chromagram_{song_name}.png")
+    plot_path = os.path.join(save_path, f"SSM_Chromagram.png")
+    plt.savefig(plot_path)
+    plt.close()
+
+    # Update the JSON tracking
+    if song_name not in tracking_data:
+        tracking_data[song_name] = {}
+    tracking_data[song_name]["SSM_processed"] = True
+    if not jignore:
+        with open(json_path, 'w') as f:
+            json.dump(tracking_data, f, indent=4)
+
+    print(f"Self-Similarity Matrix and Chromagram processing complete for {song_name}.\n Saved to {plot_path}.")
+
+@log_elapsed_time(lambda *args, **kwargs: f"Mel Spectrogram - {Path(args[0]['path']).name}")
+def process_mel_spectrogram_and_save(features, json_path, save_path, plot_width=12, plot_height=8, jignore=False):
+    """
+    Processes the Mel spectrogram of the given audio file, converts it to decibel scale, and saves the plot.
+    Updates the processing status in the JSON file.
+    """
+    mel_to_db = features['mel_to_db']
+    sr = features['sr']
+    audio_path = features['path']
+    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+    if os.path.exists(json_path) and not jignore:
+        with open(json_path, 'r') as f:
+            tracking_data = json.load(f)
+    else:
+        tracking_data = {}
+
+    if tracking_data.get(song_name, {}).get("Mel_Spectrogram_processed", False):
+        print(f"Mel Spectrogram already processed for {song_name}. Skipping...")
+        return
+
+    plt.figure(figsize=(plot_width, plot_height))
+    librosa.display.specshow(mel_to_db, sr=sr, hop_length=512, x_axis='time', y_axis='mel')
+    plt.title(f'Mel Spectrogram: {song_name}')
+    plt.colorbar(format='%+2.0f dB')
+
+    #mel_spec_path = os.path.join(save_path, f"Mel_Spectrogram_{song_name}.png")
+    mel_spec_path = os.path.join(save_path, f"Mel_Spectrogram.png")
+    plt.savefig(mel_spec_path)
+    plt.close()
+
+    tracking_data.setdefault(song_name, {})["Mel_Spectrogram_processed"] = True
+    if not jignore:
+        with open(json_path, 'w') as f:
+            json.dump(tracking_data, f, indent=4)
+
+    print(f"Mel Spectrogram processing complete for {song_name}.\n Saved to {mel_spec_path}.")
+
+@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Percussive SFFT - {Path(args[0]['path']).name}")
+def process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
+    """
+    Processes the Harmonic CQT and Percussive SFFT of the given audio file and saves the plots.
+    Updates the processing status in the JSON file.
+    """
+    y_harmonic = features['y_harmonic']
+    y_percussive = features['y_percussive']
+    sr = features['sr']
+    audio_path = features['path']
+    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+    bins_per_octave = 12 * 8
+    n_bins = bins_per_octave * 9
+
+    if os.path.exists(json_path) and not jignore:
+        with open(json_path, 'r') as f:
+            tracking_data = json.load(f)
+    else:
+        tracking_data = {}
+
+    if tracking_data.get(song_name, {}).get("Harmonic_CQT_Percussive_SFFT_processed", False):
+        print(f"Harmonic CQT and Percussive SFFT already processed for {song_name}. Skipping...")
+        return
+
+    CQT_harmonic = librosa.amplitude_to_db(np.abs(librosa.cqt(y_harmonic, sr=sr, bins_per_octave=bins_per_octave, n_bins=n_bins)), ref=np.max)
+    D_percussive = librosa.amplitude_to_db(np.abs(librosa.stft(y_percussive)), ref=np.max)
+
+    plt.figure(figsize=(plot_width, plot_height))
+    plt.subplot(2, 1, 1)
+    librosa.display.specshow(CQT_harmonic, sr=sr, x_axis='time', y_axis='cqt_note', bins_per_octave=bins_per_octave)
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(f'{song_name} Harmonic CQT')
+
+    plt.subplot(2, 1, 2)
+    librosa.display.specshow(D_percussive, sr=sr, x_axis='time', y_axis='log')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(f'{song_name} Percussive SFFT')
+    plt.tight_layout()
+
+    #plot_path = os.path.join(save_path, f"Harmonic_CQT_Percussive_SFFT_{song_name}.png")
+    plot_path = os.path.join(save_path, f"Harmonic_CQT_Percussive_SFFT.png")
+    plt.savefig(plot_path)
+    plt.close()
+
+    tracking_data.setdefault(song_name, {})["Harmonic_CQT_Percussive_SFFT_processed"] = True
+    if not jignore:
+        with open(json_path, 'w') as f:
+            json.dump(tracking_data, f, indent=4)
+
+    print(f"Harmonic CQT and Percussive SFFT processing complete for {song_name}.\n Saved to {plot_path}.")
+
+@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Harmonic Mel - {Path(args[0]['path']).name}")
+def process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
+    """
+    Processes the Harmonic CQT and Harmonic Mel spectrogram of the given audio file and saves the plots.
+    Updates the processing status in the JSON file.
+    """
+    y_harmonic = features['y_harmonic']
+    sr = features['sr']
+    audio_path = features['path']
+    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+    bins_per_octave = 12 * 8
+    n_bins = bins_per_octave * 9
+    n_fft = 2048 * 10
+    hop_length = 44100 // 100
+    n_mels = 256 * 10
+
+    if os.path.exists(json_path) and not jignore:
+        with open(json_path, 'r') as f:
+            tracking_data = json.load(f)
+    else:
+        tracking_data = {}
+
+    if tracking_data.get(song_name, {}).get("Harmonic_CQT_Harmonic_Mel_processed", False):
+        print(f"Harmonic CQT and Harmonic Mel spectrogram already processed for {song_name}. Skipping...")
+        return
+
+    CQT_harmonic = librosa.amplitude_to_db(np.abs(librosa.cqt(y_harmonic, sr=sr, bins_per_octave=bins_per_octave, n_bins=n_bins)), ref=np.max)
+    S_harmonic = librosa.feature.melspectrogram(y=y_harmonic, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
+    D_harmonic = librosa.amplitude_to_db(S_harmonic, ref=np.max)
+
+    plt.figure(figsize=(plot_width, plot_height))
+    plt.subplot(2, 1, 1)
+    librosa.display.specshow(CQT_harmonic, sr=sr, x_axis='time', y_axis='cqt_note', bins_per_octave=bins_per_octave)
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(f'{song_name} Harmonic CQT')
+
+    plt.subplot(2, 1, 2)
+    librosa.display.specshow(D_harmonic, sr=sr, x_axis='time', y_axis='mel')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(f'{song_name} Harmonic Mel Spectrogram')
+    plt.tight_layout()
+
+    #plot_path = os.path.join(save_path, f"Harmonic_CQT_Harmonic_Mel_{song_name}.png")
+    plot_path = os.path.join(save_path, f"Harmonic_CQT_Harmonic_Mel.png")
+    plt.savefig(plot_path)
+    plt.close()
+
+    tracking_data.setdefault(song_name, {})["Harmonic_CQT_Harmonic_Mel_processed"] = True
+    if not jignore:
+        with open(json_path, 'w') as f:
+            json.dump(tracking_data, f, indent=4)
+
+    print(f"Harmonic CQT and Harmonic Mel processing complete for {song_name}.\n Saved to {plot_path}.")
+
+def process_all(audio_file, json_path, save_path, cache_dir="feature_cache"):
+    """
+    Unified function to process all the spectrograms and related features for an audio file.
+    Uses caching to save and retrieve extracted features.
+    """
+    features = extract_audio_features(audio_file, cache_dir)
+    process_stft_and_save(features, json_path, save_path, jignore = False) #YES!
+    process_SSM_and_chr_and_save(features, json_path, save_path, jignore = False) #YES!
+    process_mel_spectrogram_and_save(features, json_path, save_path, jignore = False) #YES!
+    process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_path, jignore = False) #YES!
+    process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_path, jignore = False) #NO!
+    
+
 '''
 @log_elapsed_time(lambda *args, **kwargs: f"Self-Similarity Matrix and Chromagram - {Path(args[0][2]).name}")
 def process_SSM_and_chr_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
@@ -471,296 +768,6 @@ def process_SSM_and_chr_and_save(features, json_path, save_path, plot_width=12, 
 
     print(f"Self-Similarity Matrix and Chromagram processing complete for {song_name}.\n Saved to {plot_path}.")
 '''
-@log_elapsed_time(lambda *args, **kwargs: f"Self-Similarity Matrix and Chromagram - {Path(args[0]['path']).name}")
-def process_SSM_and_chr_and_save(features, json_path, save_path, jignore=False):
-    """
-    Processes the self-similarity matrix (SSM) and Chromagram of the given audio file, applies diagonal enhancement, and saves the plots.
-    Updates the processing status in the JSON file.
-    
-    Parameters:
-    - audio_file: tuple containing (y, sr, path, duration)
-    - json_path: str, path to the JSON tracking file
-    - save_path: str, directory where plots will be saved
-    - jignore: bool, whether to ignore updating the JSON file
-    """
-    
-    def get_ssm(C):
-        CNorm = np.sqrt(np.sum(C**2, axis=0))
-        C = C / CNorm[None, :]
-        return np.dot(C.T, C)
-
-    def chunk_average(C, f):
-        C2 = np.zeros((C.shape[0], C.shape[1] // f))
-        for j in range(C2.shape[1]):
-            C2[:, j] = np.mean(C[:, j * f:(j + 1) * f], axis=1)
-        return C2
-
-    def diagonally_enhance(D, K):
-        M = D.shape[0] - K + 1
-        S = np.zeros((M, M))
-        for i in range(M):
-            for j in range(M):
-                avg = 0
-                for k in range(K):
-                    avg += D[i + k, j + k]
-                S[i, j] = avg / K
-        return S
-
-    # Load the tracking JSON file
-    if os.path.exists(json_path) and not jignore:
-        with open(json_path, 'r') as f:
-            tracking_data = json.load(f)
-    else:
-        tracking_data = {}
-
-    # Initialize variables
-    y = features['y']
-    sr = features['sr']
-    audio_path = features['path']
-
-    # Set parameters for CQT and Chromagram
-    hop_length = math.ceil(sr / 5)  # Adjust hop_length for time resolution
-    compression_ratio = 0.4  # Compression ratio for dynamic range compression
-    
-    # Get the name of the song from the audio path
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
-
-    # Check if this step has already been processed
-    if tracking_data.get(song_name, {}).get("SSM_processed", False):
-        print(f"Self-Similarity Matrix already processed for {song_name}. Skipping...")
-        return
-
-    #---COMPUTING CHROMA---#
-
-    # Compute Chromagram directly from the harmonic component of the audio
-    chroma = features['chroma'] 
-    # Perform global normalization on the chromagram
-    chroma_max = chroma.max()
-    if (chroma_max > 0):
-        chroma /= chroma_max
-
-    # Apply dynamic range compression
-    chroma = chroma ** compression_ratio
-
-    #---COMPUTING SSM---#
-
-    # Compute Mel spectrogram
-    mel = librosa.feature.melspectrogram(y=y, sr=sr)
-    mel_to_db = librosa.power_to_db(mel, ref=np.max)
-
-    # Compute Self-Similarity Matrix
-    D = get_ssm(chunk_average(mel_to_db, 43))
-
-    # Diagonally enhance the matrix
-    DDiag = diagonally_enhance(D, 4)
-
-    # Determine the size of s
-    s = 12  # You can adjust this value as needed for appropriate graph filling
-
-    # Plotting SSM and Chromagram
-    plt.figure(figsize=(s, s + s / 2))  # Height is s + s/2 to fit both plots
-
-    # Plot Self-Similarity Matrix (Square)
-    ax1 = plt.subplot2grid((3, 1), (0, 0), rowspan=2)
-    im1 = ax1.imshow(DDiag, cmap='magma')
-    ax1.set_aspect('equal')  # Ensure the plot is square
-    ax1.xaxis.set_ticks_position('top')
-    ax1.xaxis.set_label_position('top')
-    plt.title(f'Self-Similarity Matrix: {song_name}')
-    #plt.colorbar(im1, ax=ax1)
-
-    # Convert frames to seconds for x and y axis labels
-    hop = 512
-    frames_per_second = sr / hop
-    num_frames = DDiag.shape[0]
-    integer_ticks = np.arange(0, int(num_frames // frames_per_second) + 1)
-    ax1.set_xticks(integer_ticks * frames_per_second)
-    ax1.set_xticklabels(integer_ticks)
-    ax1.set_yticks(integer_ticks * frames_per_second)
-    ax1.set_yticklabels(integer_ticks)
-
-    # Plotting Chromagram (Rectangle, width=s, height=s/2)
-    ax2 = plt.subplot2grid((3, 1), (2, 0), rowspan=1)
-    chroma_img = librosa.display.specshow(chroma, sr=sr, hop_length=hop_length, x_axis='time', y_axis='chroma', ax=ax2)
-    plt.title(f'Chromagram for {song_name}')
-    #plt.colorbar(chroma_img, ax=ax2)
-
-    # Set the aspect ratio and align the Chromagram to the top
-    ax2.set_aspect(aspect=2)  # Aspect ratio 2:1 to make it half the height of SSM
-    ax2.set_anchor('N')  # Align Chromagram plot to the top
-
-    plt.tight_layout()
-
-    plot_path = os.path.join(save_path, f"SSM_Chromagram_{song_name}.png")
-    plt.savefig(plot_path)
-    plt.close()
-
-    # Update the JSON tracking
-    if song_name not in tracking_data:
-        tracking_data[song_name] = {}
-    tracking_data[song_name]["SSM_processed"] = True
-    if not jignore:
-        with open(json_path, 'w') as f:
-            json.dump(tracking_data, f, indent=4)
-
-    print(f"Self-Similarity Matrix and Chromagram processing complete for {song_name}.\n Saved to {plot_path}.")
-
-@log_elapsed_time(lambda *args, **kwargs: f"Mel Spectrogram - {Path(args[0]['path']).name}")
-def process_mel_spectrogram_and_save(features, json_path, save_path, plot_width=12, plot_height=8, jignore=False):
-    """
-    Processes the Mel spectrogram of the given audio file, converts it to decibel scale, and saves the plot.
-    Updates the processing status in the JSON file.
-    """
-    mel_to_db = features['mel_to_db']
-    sr = features['sr']
-    audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
-
-    if os.path.exists(json_path) and not jignore:
-        with open(json_path, 'r') as f:
-            tracking_data = json.load(f)
-    else:
-        tracking_data = {}
-
-    if tracking_data.get(song_name, {}).get("Mel_Spectrogram_processed", False):
-        print(f"Mel Spectrogram already processed for {song_name}. Skipping...")
-        return
-
-    plt.figure(figsize=(plot_width, plot_height))
-    librosa.display.specshow(mel_to_db, sr=sr, hop_length=512, x_axis='time', y_axis='mel')
-    plt.title(f'Mel Spectrogram: {song_name}')
-    plt.colorbar(format='%+2.0f dB')
-
-    mel_spec_path = os.path.join(save_path, f"Mel_Spectrogram_{song_name}.png")
-    plt.savefig(mel_spec_path)
-    plt.close()
-
-    tracking_data.setdefault(song_name, {})["Mel_Spectrogram_processed"] = True
-    if not jignore:
-        with open(json_path, 'w') as f:
-            json.dump(tracking_data, f, indent=4)
-
-    print(f"Mel Spectrogram processing complete for {song_name}.\n Saved to {mel_spec_path}.")
-
-@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Percussive SFFT - {Path(args[0]['path']).name}")
-def process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
-    """
-    Processes the Harmonic CQT and Percussive SFFT of the given audio file and saves the plots.
-    Updates the processing status in the JSON file.
-    """
-    y_harmonic = features['y_harmonic']
-    y_percussive = features['y_percussive']
-    sr = features['sr']
-    audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
-
-    bins_per_octave = 12 * 8
-    n_bins = bins_per_octave * 9
-
-    if os.path.exists(json_path) and not jignore:
-        with open(json_path, 'r') as f:
-            tracking_data = json.load(f)
-    else:
-        tracking_data = {}
-
-    if tracking_data.get(song_name, {}).get("Harmonic_CQT_Percussive_SFFT_processed", False):
-        print(f"Harmonic CQT and Percussive SFFT already processed for {song_name}. Skipping...")
-        return
-
-    CQT_harmonic = librosa.amplitude_to_db(np.abs(librosa.cqt(y_harmonic, sr=sr, bins_per_octave=bins_per_octave, n_bins=n_bins)), ref=np.max)
-    D_percussive = librosa.amplitude_to_db(np.abs(librosa.stft(y_percussive)), ref=np.max)
-
-    plt.figure(figsize=(plot_width, plot_height))
-    plt.subplot(2, 1, 1)
-    librosa.display.specshow(CQT_harmonic, sr=sr, x_axis='time', y_axis='cqt_note', bins_per_octave=bins_per_octave)
-    plt.colorbar(format='%+2.0f dB')
-    plt.title(f'{song_name} Harmonic CQT')
-
-    plt.subplot(2, 1, 2)
-    librosa.display.specshow(D_percussive, sr=sr, x_axis='time', y_axis='log')
-    plt.colorbar(format='%+2.0f dB')
-    plt.title(f'{song_name} Percussive SFFT')
-    plt.tight_layout()
-
-    plot_path = os.path.join(save_path, f"Harmonic_CQT_Percussive_SFFT_{song_name}.png")
-    plt.savefig(plot_path)
-    plt.close()
-
-    tracking_data.setdefault(song_name, {})["Harmonic_CQT_Percussive_SFFT_processed"] = True
-    if not jignore:
-        with open(json_path, 'w') as f:
-            json.dump(tracking_data, f, indent=4)
-
-    print(f"Harmonic CQT and Percussive SFFT processing complete for {song_name}.\n Saved to {plot_path}.")
-
-@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Harmonic Mel - {Path(args[0]['path']).name}")
-def process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
-    """
-    Processes the Harmonic CQT and Harmonic Mel spectrogram of the given audio file and saves the plots.
-    Updates the processing status in the JSON file.
-    """
-    y_harmonic = features['y_harmonic']
-    sr = features['sr']
-    audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
-
-    bins_per_octave = 12 * 8
-    n_bins = bins_per_octave * 9
-    n_fft = 2048 * 10
-    hop_length = 44100 // 100
-    n_mels = 256 * 10
-
-    if os.path.exists(json_path) and not jignore:
-        with open(json_path, 'r') as f:
-            tracking_data = json.load(f)
-    else:
-        tracking_data = {}
-
-    if tracking_data.get(song_name, {}).get("Harmonic_CQT_Harmonic_Mel_processed", False):
-        print(f"Harmonic CQT and Harmonic Mel spectrogram already processed for {song_name}. Skipping...")
-        return
-
-    CQT_harmonic = librosa.amplitude_to_db(np.abs(librosa.cqt(y_harmonic, sr=sr, bins_per_octave=bins_per_octave, n_bins=n_bins)), ref=np.max)
-    S_harmonic = librosa.feature.melspectrogram(y=y_harmonic, sr=sr, n_fft=n_fft, hop_length=hop_length, n_mels=n_mels)
-    D_harmonic = librosa.amplitude_to_db(S_harmonic, ref=np.max)
-
-    plt.figure(figsize=(plot_width, plot_height))
-    plt.subplot(2, 1, 1)
-    librosa.display.specshow(CQT_harmonic, sr=sr, x_axis='time', y_axis='cqt_note', bins_per_octave=bins_per_octave)
-    plt.colorbar(format='%+2.0f dB')
-    plt.title(f'{song_name} Harmonic CQT')
-
-    plt.subplot(2, 1, 2)
-    librosa.display.specshow(D_harmonic, sr=sr, x_axis='time', y_axis='mel')
-    plt.colorbar(format='%+2.0f dB')
-    plt.title(f'{song_name} Harmonic Mel Spectrogram')
-    plt.tight_layout()
-
-    plot_path = os.path.join(save_path, f"Harmonic_CQT_Harmonic_Mel_{song_name}.png")
-    plt.savefig(plot_path)
-    plt.close()
-
-    tracking_data.setdefault(song_name, {})["Harmonic_CQT_Harmonic_Mel_processed"] = True
-    if not jignore:
-        with open(json_path, 'w') as f:
-            json.dump(tracking_data, f, indent=4)
-
-    print(f"Harmonic CQT and Harmonic Mel processing complete for {song_name}.\n Saved to {plot_path}.")
-
-def process_all(audio_file, json_path, save_path, cache_dir="feature_cache"):
-    """
-    Unified function to process all the spectrograms and related features for an audio file.
-    Uses caching to save and retrieve extracted features.
-    """
-    features = extract_audio_features(audio_file, cache_dir)
-    process_stft_and_save(features, json_path, save_path, jignore = False) #YES!
-    process_SSM_and_chr_and_save(features, json_path, save_path, jignore = False) #YES!
-    process_mel_spectrogram_and_save(features, json_path, save_path, jignore = False) #YES!
-    process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_path, jignore = False) #YES!
-    process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_path, jignore = False) #NO!
-    
-
-
 
 '''
 # @log_elapsed_time(lambda *args, **kwargs: f"Chromagram and CQT Spectrogram - {Path(args[0]['path']).name}")
