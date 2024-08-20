@@ -9,11 +9,51 @@ import logging
 import time
 import pickle
 import threading
+import hashlib
 from pathlib import Path
 
 # Set up logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s \n')
 
+from cryptography.fernet import Fernet
+import base64
+
+def decrypt_text(encrypted_text, decryption_key):
+    """
+    Decrypts the encrypted text using the provided decryption key.
+    
+    Parameters:
+    - encrypted_text: str, the encrypted text to be decrypted.
+    - decryption_key: str, the key to be used for decryption.
+    
+    Returns:
+    - str, the decrypted text (original track name).
+    """
+    # Decode the key and the encrypted text from base64
+    key = base64.urlsafe_b64decode(decryption_key.encode())
+    cipher_suite = Fernet(key)
+    
+    # Decode the encrypted text from base64 and then decrypt it
+    decrypted_text = cipher_suite.decrypt(base64.urlsafe_b64decode(encrypted_text.encode()))
+    
+    return decrypted_text.decode()
+
+def get_encrypted_data(file_path):
+    """
+    Reads the encrypted name and decryption key from the specified file.
+    
+    Parameters:
+    - file_path: str, the path to the file containing the encrypted data.
+    
+    Returns:
+    - tuple of (encrypted_name, decryption_key), both as strings.
+    """
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+        encrypted_name = lines[0].split(": ")[1].strip()
+        decryption_key = lines[1].split(": ")[1].strip()
+    
+    return encrypted_name, decryption_key
 
 def log_elapsed_time(process_name_getter):
     def decorator(func):
@@ -182,9 +222,50 @@ def initialize_environment(working_directory, audio_files_dir, json_file_path, s
 
 '''
 
+
+import random
+from cryptography.fernet import Fernet
+
+# Generate a key for encryption/decryption (this should be securely stored)
+key = Fernet.generate_key()
+cipher_suite = Fernet(key)
 import os
 import librosa
 import random
+import base64
+from cryptography.fernet import Fernet
+
+def encrypt(text, key):
+    encrypted_text = []
+    key_length = len(key)
+    
+    for i, char in enumerate(text):
+        shift = ord(key[i % key_length].lower()) - ord('a')
+        if char.isalpha():
+            base = ord('a') if char.islower() else ord('A')
+            encrypted_char = chr((ord(char) - base + shift) % 26 + base)
+        else:
+            encrypted_char = char
+        encrypted_text.append(encrypted_char)
+    
+    return ''.join(encrypted_text)
+
+def decrypt(encrypted_text, key):
+    decrypted_text = []
+    key_length = len(key)
+    
+    for i, char in enumerate(encrypted_text):
+        shift = ord(key[i % key_length].lower()) - ord('a')
+        if char.isalpha():
+            base = ord('a') if char.islower() else ord('A')
+            decrypted_char = chr((ord(char) - base - shift) % 26 + base)
+        else:
+            decrypted_char = char
+        decrypted_text.append(decrypted_char)
+    
+    return ''.join(decrypted_text)
+
+
 
 def explore_audio_files(audio_files_dir):
     """
@@ -199,10 +280,31 @@ def explore_audio_files(audio_files_dir):
                 audio_files_paths.append(file_path)
     return audio_files_paths
 
-def initialize_environment(working_directory, audio_files_dir='', json_file_path='', sr=44100, debug=0, playback=0, file_names='', load_all_tracks=False, start_index=0, chunk_size=20, shuffle=False):
+def string_to_5_letter_hash(input_string):
+    # Step 1: Generate a SHA-256 hash of the input string
+    hash_object = hashlib.sha256(input_string.encode())
+    hex_digest = hash_object.hexdigest()
+    
+    # Step 2: Take the first 5 bytes (10 hex digits) of the hash
+    hash_substring = hex_digest[:10]
+    
+    # Step 3: Convert the hex substring to an integer
+    hash_integer = int(hash_substring, 16)
+    
+    # Step 4: Convert the integer to base-26 (A-Z)
+    letters = []
+    for _ in range(5):
+        letters.append(chr((hash_integer % 26) + ord('A')))
+        hash_integer //= 26
+    
+    # Step 5: Return the 5-letter hash
+    return ''.join(letters)
+
+def initialize_environment(working_directory, audio_files_dir='', json_file_path='', sr=44100, debug=0, playback=0, file_names='', load_all_tracks=False, start_index=0, chunk_size=20, shuffle=False, use_artist_name=True, surprise_mode=False):
     """
     Initializes the working environment by setting paths, loading audio files,
-    and printing relevant information in chunks.
+    and printing relevant information in chunks. Handles surprise mode by selecting
+    a single track, encrypting its name, and saving related information.
     """
     os.chdir(working_directory)
     print("Current Working Directory:", os.getcwd())
@@ -214,52 +316,97 @@ def initialize_environment(working_directory, audio_files_dir='', json_file_path
         print(f"Directory {audio_files_dir} does not exist.")
         return [], None
 
-    if load_all_tracks:
-        print("Exploring all audio files in the directory and subdirectories...")
+    if surprise_mode:
+        # Seed with the current time to ensure different results each time
+        random.seed(time.time())
+
+        # Explore all files and select one randomly
         audio_files_paths = explore_audio_files(audio_files_dir)
+        if not audio_files_paths:
+            print("No audio files found.")
+            return [], None
+        
+        # Select a random track
+        selected_file = random.choice(audio_files_paths)
+        
+        # Encrypt the track name
+        track_name = os.path.splitext(os.path.basename(selected_file))[0]
+        key = 'hiddenTrack'
+        encrypted_name = encrypt(selected_file, key)
+        encrypted_name_hash = string_to_5_letter_hash(encrypted_name)
+
+        
+        # Create /surprise_file/ directory if it doesn't exist
+        surprise_dir = os.path.join(working_directory, "surprise_file")
+        os.makedirs(surprise_dir, exist_ok=True)
+        
+        # Save the encrypted name and decryption key
+        encrypted_file_path = os.path.join(surprise_dir, ".encrypted-name.txt")
+        with open(encrypted_file_path, 'w') as f:
+            f.write(f"Encrypted HASH: {encrypted_name_hash}\n")
+            f.write(f"Encrypted Name: {encrypted_name}\n")
+            f.write(f"Decryption Key: {key}\n")
+        
+        # Substitute file name with 'secret - {first 5 digits of the encrypted name}'
+        secret_name = f"secret - {encrypted_name_hash}"
+        secret_file_path = os.path.join(os.path.dirname(selected_file), f"{track_name}{os.path.splitext(selected_file)[1]}")
+        os.rename(selected_file, secret_file_path)
+        print(f"Surprise mode activated. Track: {secret_name}")
+        
+        # Only this track will be processed
+        audio_files_paths = [secret_file_path]
+        save_dir = surprise_dir  # All outputs will be saved here
+
     else:
-        audio_files_paths = []
-        not_found = 0
-        print("Starting file search...")
+        # Regular mode, loading all tracks or specific files
+        if load_all_tracks:
+            print("Exploring all audio files in the directory and subdirectories...")
+            audio_files_paths = explore_audio_files(audio_files_dir)
+        else:
+            audio_files_paths = []
+            not_found = 0
+            print("Starting file search...")
 
-        if file_names == '':
-            file_names = [
-                # Default file names list as provided earlier
-            ]
+            if file_names == '':
+                file_names = [
+                    # Default file names list as provided earlier
+                ]
 
-        for file_name in file_names:
-            found_something = False
+            for file_name in file_names:
+                found_something = False
 
-            for root, _, files in os.walk(audio_files_dir):
-                file_paths = {
-                    "flac": os.path.join(root, f"{file_name}.flac"),
-                    "wav": os.path.join(root, f"{file_name}.wav"),
-                    "mp3": os.path.join(root, f"{file_name}.mp3"),
-                    "aiff": os.path.join(root, f"{file_name}.aiff")
-                }
+                for root, _, files in os.walk(audio_files_dir):
+                    file_paths = {
+                        "flac": os.path.join(root, f"{file_name}.flac"),
+                        "wav": os.path.join(root, f"{file_name}.wav"),
+                        "mp3": os.path.join(root, f"{file_name}.mp3"),
+                        "aiff": os.path.join(root, f"{file_name}.aiff")
+                    }
 
-                for ext, path in file_paths.items():
-                    if os.path.exists(path):
-                        audio_files_paths.append(path)
-                        print(f"{file_name}.{ext} found at {path}!\n")
-                        found_something = True
+                    for ext, path in file_paths.items():
+                        if os.path.exists(path):
+                            audio_files_paths.append(path)
+                            print(f"{file_name}.{ext} found at {path}!\n")
+                            found_something = True
+                            break
+
+                    if found_something:
                         break
 
-                if found_something:
-                    break
+                if not found_something:
+                    not_found += 1
+                    print(f"{file_name} wasn't found in any supported format.\n")
 
-            if not found_something:
-                not_found += 1
-                print(f"{file_name} wasn't found in any supported format.\n")
+            if not_found == 0:
+                print("All Tracks Found \n\n(: \n")
+            else:
+                print(f"{not_found} tracks were not found!\n\n): \n")
+        
+        # Shuffle the list if requested
+        if shuffle:
+            random.shuffle(audio_files_paths)
 
-        if not_found == 0:
-            print("All Tracks Found \n\n(: \n")
-        else:
-            print(f"{not_found} tracks were not found!\n\n): \n")
-
-    # Shuffle the list if requested
-    if shuffle:
-        random.shuffle(audio_files_paths)
+        save_dir = os.path.join(working_directory, "output_files")
 
     # Process files in chunks
     total_files = len(audio_files_paths)
@@ -278,8 +425,22 @@ def initialize_environment(working_directory, audio_files_dir='', json_file_path
         try:
             y, sr = librosa.load(path, sr=sr)
             duration = librosa.get_duration(y=y, sr=sr)
-            loaded_audio_files.append((y, sr, path, duration))
-            print(f"Audio file correctly loaded from {path}: y = {y.shape} \n sr = {sr} \n duration = {duration} seconds \n\n")
+            # Extract artist name from the parent folder if use_artist_name is True
+            if surprise_mode:
+                song_name = encrypted_name_hash
+            elif use_artist_name:
+                artist_name = os.path.basename(os.path.dirname(path))
+                song_name = f"{artist_name} - {os.path.splitext(os.path.basename(path))[0]}"
+            else:
+                song_name = os.path.splitext(os.path.basename(path))[0]
+                
+            loaded_audio_files.append((y, sr, path, duration, song_name))
+            
+
+            if surprise_mode:
+                print(f"Audio file correctly loaded: \nsr = {sr} \n duration = {duration} seconds \n\n")           
+            else:
+                print(f"Audio file correctly loaded from {path}: \nsr = {sr} \n duration = {duration} seconds \n\n")
         except Exception as e:
             print(f"Failed to load audio file from {path}: {e}")
 
@@ -289,18 +450,22 @@ def initialize_environment(working_directory, audio_files_dir='', json_file_path
     loaded_audio_files.sort(key=lambda x: x[3])
 
     print("Tracks sorted by duration (shortest to longest):")
-    for i, (y, sr, path, duration) in enumerate(loaded_audio_files, start_index + 1):
-        print(f"{i}. {os.path.basename(path)} - {duration:.2f} seconds")
+    for i, (y, sr, path, duration, song_name) in enumerate(loaded_audio_files, start_index + 1):
+        if surprise_mode:
+            print(f"{i}. {encrypted_name_hash} - {duration:.2f} seconds")
+        else:
+            print(f"{i}. {song_name} - {duration:.2f} seconds")
     print("================================\n")
 
     if playback == 1 and loaded_audio_files:
-        for _, _, path, _ in loaded_audio_files:
+        for _, _, path, _, _ in loaded_audio_files:
             print(f"Listen to {path}")
 
     # Determine if there are more files to process
     next_start_index = end_index if end_index < total_files else None
 
     return loaded_audio_files, next_start_index
+
 
 
 def is_processing_needed(track_name, json_data):
@@ -334,7 +499,7 @@ def delete_cached_features(audio_file, cache_dir="feature_cache"):
     Returns:
     - bool: True if the cache file was successfully deleted, False if the file was not found.
     """
-    _, _, path, _ = audio_file
+    _, _, path, _, _ = audio_file
     song_name = os.path.splitext(os.path.basename(path))[0]
     feature_cache_path = os.path.join(cache_dir, f"{song_name}_features.pkl")
 
@@ -347,15 +512,23 @@ def delete_cached_features(audio_file, cache_dir="feature_cache"):
         return False
     
 
-@log_elapsed_time(lambda *args, **kwargs: f"Extract Audio Features - {Path(args[0][2]).name}")
+@log_elapsed_time(lambda *args, **kwargs: f"Extract Audio Features - {Path(args[0][4])}")
 def extract_audio_features(audio_file, cache_dir="feature_cache"):
     """
     Extract common features from the audio file to be reused across multiple functions.
     Features are cached to disk to avoid recomputation.
     """
-    y, sr, path, duration = audio_file
-    song_name = os.path.splitext(os.path.basename(path))[0]
+    y, sr, path, duration, name = audio_file
+    song_name = name
     feature_cache_path = os.path.join(cache_dir, f"{song_name}_features.pkl")
+
+    # Check if the file is in surprise mode (encrypted)
+    surprise_mode_dir = os.path.join(os.getcwd(), "surprise_file")
+    encrypted_file_path = os.path.join(surprise_mode_dir, ".encrypted-name.txt")
+
+    # Proceed with feature extraction
+    feature_cache_path = os.path.join(cache_dir, f"{song_name}_features.pkl")
+
 
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir, exist_ok=True)
@@ -375,6 +548,7 @@ def extract_audio_features(audio_file, cache_dir="feature_cache"):
             print(f"Corrupted cache file {feature_cache_path} has been deleted.")
     
     # Compute features (perform only once)
+    # The rest of the feature extraction code remains the same
 
     # Set the STFT parameters
     STFT_n_fft = 22000 * 10
@@ -422,7 +596,8 @@ def extract_audio_features(audio_file, cache_dir="feature_cache"):
 
     return features
 
-@log_elapsed_time(lambda *args, **kwargs: f"STFT - {Path(args[0]['path']).name}")
+
+@log_elapsed_time(lambda *args, **kwargs: f"STFT - {Path(args[0]['song_name'])}")
 def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_height=20, jignore=False):
     """
     Processes the STFT of the given audio file and saves the spectrogram image.

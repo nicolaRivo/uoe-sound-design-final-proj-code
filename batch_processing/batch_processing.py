@@ -41,7 +41,8 @@ def main():
             load_all_tracks=True,
             start_index=start_index,
             chunk_size=chunk_size,
-            shuffle=True  # Enable shuffling
+            shuffle=True,  # Enable shuffling
+            surprise_mode=True
         )
 
         # Process each audio file in the loaded chunk
