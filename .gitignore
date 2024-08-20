@@ -1,0 +1,32 @@
+# Ignore the virtual environment
+myenv/
+
+# Ignore compiled Python files
+batch_processing/**/*.pyc
+
+# Ignore any temporary or backup files
+batch_processing/**/*~
+batch_processing/**/*.bak
+batch_processing/**/*.tmp
+
+# Ignore any output or logs
+batch_processing/**/output/
+batch_processing/**/logs/
+
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore specific large files
+myenv/notebooks/My\ first\ Analysis.ipynb
+myenv/lib/python3.10/site-packages/scipy/.dylibs/libscipy_openblas.dylib
+myenv/lib/python3.10/site-packages/tensorflow/python/_pywrap_tensorflow_internal.so
+
+# Ignore all .dylib files (Mac-specific dynamic libraries)
+*.dylib
+
+# Ignore all .so files (Shared object files for C/C++ libraries)
+*.so
+
+# Ignore additional large files or directories as needed
+
