@@ -500,15 +500,15 @@ def delete_cached_features(audio_file, cache_dir="feature_cache"):
     - bool: True if the cache file was successfully deleted, False if the file was not found.
     """
     _, _, path, _, _ = audio_file
-    song_name = os.path.splitext(os.path.basename(path))[0]
+    song_name =audio_file[4]
     feature_cache_path = os.path.join(cache_dir, f"{song_name}_features.pkl")
 
     if os.path.exists(feature_cache_path):
         os.remove(feature_cache_path)
-        print(f"Cached features for {song_name} have been deleted from {feature_cache_path}")
+        print(f"Cached features for {song_name} have been deleted")
         return True
     else:
-        print(f"No cached features found for {song_name} at {feature_cache_path}")
+        print(f"No cached features found for {song_name}")
         return False
     
 
@@ -580,6 +580,7 @@ def extract_audio_features(audio_file, cache_dir="feature_cache"):
         'y': y,
         'sr': sr,
         'path': path,
+        'song_name' : name,
         'y_harmonic': y_harmonic,
         'y_percussive': y_percussive,
         'S': S,
@@ -597,7 +598,7 @@ def extract_audio_features(audio_file, cache_dir="feature_cache"):
     return features
 
 
-@log_elapsed_time(lambda *args, **kwargs: f"STFT - {Path(args[0]['song_name'])}")
+@log_elapsed_time(lambda *args, **kwargs: f"STFT - {Path(args[0]['song_name']).name}")
 def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_height=20, jignore=False):
     """
     Processes the STFT of the given audio file and saves the spectrogram image.
@@ -606,7 +607,7 @@ def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_he
     D = features['D']
     sr = features['sr']
     audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+    song_name = features['song_name']
 
     if os.path.exists(json_path) and not jignore:
         with open(json_path, 'r') as f:
@@ -643,7 +644,7 @@ def process_stft_and_save(features, json_path, save_path, plot_width=50, plot_he
     
     print(f"STFT processing complete for {song_name}.\n Saved to {output_file}.")
 
-@log_elapsed_time(lambda *args, **kwargs: f"Self-Similarity Matrix and Chromagram - {Path(args[0]['path']).name}")
+@log_elapsed_time(lambda *args, **kwargs: f"Self-Similarity Matrix and Chromagram - {Path(args[0]['song_name']).name}")
 def process_SSM_and_chr_and_save(features, json_path, save_path, jignore=False):
     """
     Processes the self-similarity matrix (SSM) and Chromagram of the given audio file, applies diagonal enhancement, and saves the plots.
@@ -695,7 +696,7 @@ def process_SSM_and_chr_and_save(features, json_path, save_path, jignore=False):
     compression_ratio = 0.4  # Compression ratio for dynamic range compression
     
     # Get the name of the song from the audio path
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+    song_name = features['song_name']
 
     # Check if this step has already been processed
     if tracking_data.get(song_name, {}).get("SSM_processed", False):
@@ -778,7 +779,7 @@ def process_SSM_and_chr_and_save(features, json_path, save_path, jignore=False):
 
     print(f"Self-Similarity Matrix and Chromagram processing complete for {song_name}.\n Saved to {plot_path}.")
 
-@log_elapsed_time(lambda *args, **kwargs: f"Mel Spectrogram - {Path(args[0]['path']).name}")
+@log_elapsed_time(lambda *args, **kwargs: f"Mel Spectrogram - {Path(args[0]['song_name']).name}")
 def process_mel_spectrogram_and_save(features, json_path, save_path, plot_width=12, plot_height=8, jignore=False):
     """
     Processes the Mel spectrogram of the given audio file, converts it to decibel scale, and saves the plot.
@@ -787,7 +788,7 @@ def process_mel_spectrogram_and_save(features, json_path, save_path, plot_width=
     mel_to_db = features['mel_to_db']
     sr = features['sr']
     audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+    song_name = features['song_name']
 
     if os.path.exists(json_path) and not jignore:
         with open(json_path, 'r') as f:
@@ -816,7 +817,7 @@ def process_mel_spectrogram_and_save(features, json_path, save_path, plot_width=
 
     print(f"Mel Spectrogram processing complete for {song_name}.\n Saved to {mel_spec_path}.")
 
-@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Percussive SFFT - {Path(args[0]['path']).name}")
+@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Percussive SFFT - {Path(args[0]['song_name']).name}")
 def process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
     """
     Processes the Harmonic CQT and Percussive SFFT of the given audio file and saves the plots.
@@ -826,7 +827,7 @@ def process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_
     y_percussive = features['y_percussive']
     sr = features['sr']
     audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+    song_name = features['song_name']
 
     bins_per_octave = 12 * 8
     n_bins = bins_per_octave * 9
@@ -868,7 +869,7 @@ def process_harmonic_cqt_and_percussive_sfft_and_save(features, json_path, save_
 
     print(f"Harmonic CQT and Percussive SFFT processing complete for {song_name}.\n Saved to {plot_path}.")
 
-@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Harmonic Mel - {Path(args[0]['path']).name}")
+@log_elapsed_time(lambda *args, **kwargs: f"Harmonic CQT and Harmonic Mel - {Path(args[0]['song_name']).name}")
 def process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_path, plot_width=12, plot_height=12, jignore=False):
     """
     Processes the Harmonic CQT and Harmonic Mel spectrogram of the given audio file and saves the plots.
@@ -877,7 +878,7 @@ def process_harmonic_cqt_and_harmonic_mel_and_save(features, json_path, save_pat
     y_harmonic = features['y_harmonic']
     sr = features['sr']
     audio_path = features['path']
-    song_name = os.path.splitext(os.path.basename(audio_path))[0]
+    song_name = features['song_name']
 
     bins_per_octave = 12 * 8
     n_bins = bins_per_octave * 9

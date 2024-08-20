@@ -7,12 +7,12 @@ plot_width, plot_height = 50, 20
 
 working_directory = "/Users/nicola/Documents/MSc SOund Design 20-24/Final Project/"
 audio_files_subdir = "/Sound/Audio_Files/"
-graphs_location = "/Graphs/Batch All_B/"
+graphs_location = "/Graphs/Batch All_1.0/"
 os.chdir(working_directory)
-json_file = "/Graphs/Batch All_B/tracking_file.json"
+json_file = graphs_location + "/tracking_file.json"
 sr = 44100
 store_cache = False
-
+surprise_mode = True
 def main():
     print("Starting batch processing...")
 
@@ -42,13 +42,13 @@ def main():
             start_index=start_index,
             chunk_size=chunk_size,
             shuffle=True,  # Enable shuffling
-            surprise_mode=True
+            surprise_mode=surprise_mode
         )
 
         # Process each audio file in the loaded chunk
         for audio_file in loaded_audio_files:
             # Get the name of the song from the audio path
-            song_name = os.path.splitext(os.path.basename(audio_file[2]))[0]
+            song_name = audio_file[4]
                               
             # Create the song's directory if it doesn't exist                 
             song_dir = os.path.join(os.path.dirname(graphs_dir), song_name)
@@ -56,6 +56,7 @@ def main():
 
             # Check if processing is needed
             if is_processing_needed(song_name, json_data):
+                
                 process_all(audio_file, json_file_path, song_dir, cache_dir=cache_dir)
             else:
                 print(f"Skipping {song_name}, all graphs are already processed.")
