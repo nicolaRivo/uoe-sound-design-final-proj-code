@@ -71,6 +71,7 @@ def ensure_json_file_exists(json_path):
         except Exception as e:
             print(f"Error verifying JSON file at {json_path}: {e}")
 
+'''
 def initialize_environment(working_directory, audio_files_dir, json_file_path, sr=44100, debug=0, playback=0, file_names='', load_all_tracks=False):
     """
     Initializes the working environment by setting paths, loading audio files,
@@ -178,6 +179,129 @@ def initialize_environment(working_directory, audio_files_dir, json_file_path, s
             print(f"Listen to {path}")
 
     return loaded_audio_files
+
+'''
+
+import os
+import librosa
+import random
+
+def explore_audio_files(audio_files_dir):
+    """
+    Explore the directory and its subdirectories to gather all audio files.
+    Returns a list of file paths.
+    """
+    audio_files_paths = []
+    for root, _, files in os.walk(audio_files_dir):
+        for file in files:
+            if file.endswith((".flac", ".wav", ".mp3", ".aiff")):
+                file_path = os.path.join(root, file)
+                audio_files_paths.append(file_path)
+    return audio_files_paths
+
+def initialize_environment(working_directory, audio_files_dir='', json_file_path='', sr=44100, debug=0, playback=0, file_names='', load_all_tracks=False, start_index=0, chunk_size=20, shuffle=False):
+    """
+    Initializes the working environment by setting paths, loading audio files,
+    and printing relevant information in chunks.
+    """
+    os.chdir(working_directory)
+    print("Current Working Directory:", os.getcwd())
+
+    if load_all_tracks and not audio_files_dir:
+        audio_files_dir = input("Please provide the directory path containing the audio files: ")
+
+    if not os.path.exists(audio_files_dir):
+        print(f"Directory {audio_files_dir} does not exist.")
+        return [], None
+
+    if load_all_tracks:
+        print("Exploring all audio files in the directory and subdirectories...")
+        audio_files_paths = explore_audio_files(audio_files_dir)
+    else:
+        audio_files_paths = []
+        not_found = 0
+        print("Starting file search...")
+
+        if file_names == '':
+            file_names = [
+                # Default file names list as provided earlier
+            ]
+
+        for file_name in file_names:
+            found_something = False
+
+            for root, _, files in os.walk(audio_files_dir):
+                file_paths = {
+                    "flac": os.path.join(root, f"{file_name}.flac"),
+                    "wav": os.path.join(root, f"{file_name}.wav"),
+                    "mp3": os.path.join(root, f"{file_name}.mp3"),
+                    "aiff": os.path.join(root, f"{file_name}.aiff")
+                }
+
+                for ext, path in file_paths.items():
+                    if os.path.exists(path):
+                        audio_files_paths.append(path)
+                        print(f"{file_name}.{ext} found at {path}!\n")
+                        found_something = True
+                        break
+
+                if found_something:
+                    break
+
+            if not found_something:
+                not_found += 1
+                print(f"{file_name} wasn't found in any supported format.\n")
+
+        if not_found == 0:
+            print("All Tracks Found \n\n(: \n")
+        else:
+            print(f"{not_found} tracks were not found!\n\n): \n")
+
+    # Shuffle the list if requested
+    if shuffle:
+        random.shuffle(audio_files_paths)
+
+    # Process files in chunks
+    total_files = len(audio_files_paths)
+    end_index = min(start_index + chunk_size, total_files)
+
+    if start_index >= total_files:
+        print("All files have been processed.")
+        return [], None
+
+    chunk_files_paths = audio_files_paths[start_index:end_index]
+    loaded_audio_files = []
+
+    print(f"Processing files from {start_index + 1} to {end_index} of {total_files}...")
+
+    for path in chunk_files_paths:
+        try:
+            y, sr = librosa.load(path, sr=sr)
+            duration = librosa.get_duration(y=y, sr=sr)
+            loaded_audio_files.append((y, sr, path, duration))
+            print(f"Audio file correctly loaded from {path}: y = {y.shape} \n sr = {sr} \n duration = {duration} seconds \n\n")
+        except Exception as e:
+            print(f"Failed to load audio file from {path}: {e}")
+
+    print("================================")
+    print(f"Processed {len(loaded_audio_files)} files in this chunk.\n")
+
+    loaded_audio_files.sort(key=lambda x: x[3])
+
+    print("Tracks sorted by duration (shortest to longest):")
+    for i, (y, sr, path, duration) in enumerate(loaded_audio_files, start_index + 1):
+        print(f"{i}. {os.path.basename(path)} - {duration:.2f} seconds")
+    print("================================\n")
+
+    if playback == 1 and loaded_audio_files:
+        for _, _, path, _ in loaded_audio_files:
+            print(f"Listen to {path}")
+
+    # Determine if there are more files to process
+    next_start_index = end_index if end_index < total_files else None
+
+    return loaded_audio_files, next_start_index
+
 
 def is_processing_needed(track_name, json_data):
     """Check if any processing is needed for the track."""
