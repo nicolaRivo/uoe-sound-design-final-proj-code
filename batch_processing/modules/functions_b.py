@@ -316,6 +316,7 @@ def initialize_environment(working_directory, audio_files_dir='', json_file_path
         print(f"Directory {audio_files_dir} does not exist.")
         return [], None
 
+
     if surprise_mode:
         # Seed with the current time to ensure different results each time
         random.seed(time.time())
