@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "batch-processing"
+version = "0.1.0"
+description = "this is my master's final project script"
+authors = ["nicolaRivo <nicola.rivosecchi@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11"
+numpy = "<2"
+attrs = ">=22.2.0"
+termcolor = ">=1.1,<2"
+librosa = "^0.10.2.post1"
+matplotlib = "^3.9.2"
+spleeter = "^2.4.0"
+tensorflow = ">=2.5.0,<2.10.0"
+pydub = "^0.25.1"
+cryptography = "^43.0.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
