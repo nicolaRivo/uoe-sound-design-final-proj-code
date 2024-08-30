@@ -199,6 +199,34 @@ def load_tracks(working_directory, audio_files_dir='', json_file_path='', sr=441
         
         # Encrypt the track name
         track_name = os.path.splitext(os.path.basename(selected_file))[0]
+
+
+        # Loop until you find the folder named last_folder or reach the root directory
+        if use_artist_name:
+            file_path_to_process = os.path.dirname(selected_file)
+            artist_name = ""
+            prev_folder = os.path.basename(file_path_to_process)
+            last_folder = os.path.basename(audio_files_dir)
+
+            # Loop until you find the folder named last_folder or reach the root directory
+            while prev_folder != last_folder and file_path_to_process != "/":
+                if artist_name:  # If artist_name is not empty, append a separator
+                    artist_name = os.path.basename(file_path_to_process) + " / " + artist_name
+                else:  # If artist_name is empty, just assign the current folder name
+                    artist_name = os.path.basename(file_path_to_process)
+
+                # Move one level up in the directory tree
+                file_path_to_process = os.path.dirname(file_path_to_process)
+                prev_folder = os.path.basename(file_path_to_process)
+
+            # If we stopped at last_folder, include it in the artist_name
+
+            #print("Final artist name:", artist_name)
+
+            track_name = f"{artist_name} - {track_name}"
+        else:
+            track_name = os.path.splitext(os.path.basename(selected_file))[0]
+
         encrypted_name_hash = string_to_5_letter_hash(track_name)
 
         
@@ -231,8 +259,7 @@ def load_tracks(working_directory, audio_files_dir='', json_file_path='', sr=441
         
         # Substitute file name with 'secret - {first 5 digits of the encrypted name}'
         secret_name = f"secret - {encrypted_name_hash}"
-        secret_file_path = os.path.join(os.path.dirname(selected_file), f"{track_name}{os.path.splitext(selected_file)[1]}")
-        os.rename(selected_file, secret_file_path)
+        secret_file_path = selected_file
         print(f"Surprise mode activated. Track: {secret_name}")
         
         # Only this track will be processed
@@ -310,9 +337,6 @@ def load_tracks(working_directory, audio_files_dir='', json_file_path='', sr=441
             # Extract artist name from the parent folder if use_artist_name is True
             if surprise_mode:
                 song_name = encrypted_name_hash
-            elif use_artist_name:
-                artist_name = os.path.basename(os.path.dirname(path))
-                song_name = f"{artist_name} - {os.path.splitext(os.path.basename(path))[0]}"
             else:
                 song_name = os.path.splitext(os.path.basename(path))[0]
                 
