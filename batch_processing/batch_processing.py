@@ -13,6 +13,9 @@ working_directory = "/Users/nicola/Documents/MSc SOund Design 20-24/Final Projec
 
 audio_files_root_directory = '/Volumes/Arancione'
 audio_files_subdir = "Musica Flac"
+#audio_files_subdir = "Sound/My_Productions"
+audio_files_subdir = "Musica Flac"
+
 graphs_location = "myFavouritesWithStems"
 graphs_root_dir = '/Volumes/Nicola Projects SSD1TB/graphs'
 graphs_dir = os.path.join(graphs_root_dir, graphs_location)
@@ -31,7 +34,7 @@ sr = 44100
 store_cache = True
 use_artist_name = False
 
-surprise_mode = True
+surprise_mode = False
 
 if surprise_mode:
     store_cache=False
